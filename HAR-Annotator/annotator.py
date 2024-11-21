@@ -35,7 +35,6 @@ def detect(opt):
 
     dataset = LoadImages(source, img_size=imgsz, stride=stride)
 
-    # Run inference
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))
 
@@ -47,11 +46,9 @@ def detect(opt):
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
 
-        # Inference
         t1 = time_synchronized()
         pred = model(img)[0]
 
-        # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms, kpt_label=kpt_label)
         t2 = time_synchronized()
 
@@ -168,12 +165,7 @@ def scale_pose(xy):
 
 
 if __name__ == '__main__':
-#     video_root = '/home/gmission/vs-projects/SKELETON_BASED_ACTION_DETECTION/DATA/NTU_RGB_6_OF_15/'  # Path to your dataset
-#     save_root = '/home/gmission/vs-projects/SKELETON_BASED_ACTION_DETECTION/yolov7pose_ann/NTU_RGB_6_v3/'  # Path where .pkl files will be saved
-
-    # video_root = '/home/gmission/vs-projects/SKELETON_BASED_ACTION_DETECTION/DATA/NTU_RGB_15/'  # Path to your dataset
-    # save_root = '/home/gmission/vs-projects/SKELETON_BASED_ACTION_DETECTION/yolov7pose_ann/NTU_RGB_v4/'  # Path where .pkl files will be saved
-
-    video_root = 'UNKNOWN_vid/'  # Path to your dataset
-    save_root = '9_action_dataset_pkls/'  # Path where .pkl files will be saved
+    
+    video_root = '../video_folder/'  # Path to your dataset
+    save_root = '../pickle_folder/'  # Path where .pkl files will be saved
     process_dataset(video_root, save_root)
