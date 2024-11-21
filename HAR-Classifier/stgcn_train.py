@@ -1,129 +1,217 @@
-# -----------------------------------------------------------------------------------
-#  single pkl visualization
-# -----------------------------------------------------------------------------------
-
-import cv2
+import os
+import torch
 import pickle
 import numpy as np
+from tqdm import tqdm
+from torch.utils import data
+from torch.optim import Adadelta
+from sklearn.model_selection import train_test_split
 
-# Load keypoints from pkl file
-def load_keypoints(pkl_file):
-    with open(pkl_file, 'rb') as f:
-        keypoints_data = pickle.load(f)
-    return keypoints_data
+from stgcn_models import *
 
-# Visualize keypoints on frame
-def draw_keypoints_on_frame(frame, keypoints, color=(0, 255, 0), radius=3):
-    for person_keypoints in keypoints:
-        for kpt in person_keypoints:
-            x, y, conf = int(kpt[0]), int(kpt[1]), kpt[2]
-            print(f"Keypoint: x={x}, y={y}, conf={conf}")  
+# Configuration
+save_folder = 'weights'
+os.makedirs(save_folder, exist_ok=True)
 
-            if conf > 0.5: 
-                cv2.circle(frame, (x, y), radius, color, -1)
-    return frame
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+epochs = 100  # Reduced from 100000 for practicality
+batch_size = 32
+learning_rate = 0.001
+time_steps = 30  # Fixed sequence length
 
-# Visualize keypoints on video
-def visualize_keypoints_on_video(video_path, pkl_file, resize_factor=0.5):
-    keypoints_data = load_keypoints(pkl_file)
-    cap = cv2.VideoCapture(video_path)
+dataset_path = 'pickle_folder'
 
-    frame_index = 0
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        if frame_index < len(keypoints_data):
-            keypoints = keypoints_data[frame_index]
-            frame = draw_keypoints_on_frame(frame, keypoints)
-        
-        # Resize the frame
-        frame = cv2.resize(frame, None, fx=resize_factor, fy=resize_factor)
-        
-        cv2.imshow('Keypoints on Video', frame)
-        if cv2.waitKey(30) & 0xFF == ord('q'):
-            break
-        
-        frame_index += 1
+# Get class names and number of classes
+class_names = sorted([d for d in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, d))])
+num_classes = len(class_names)
+print('Name of Classes:', class_names)
+print('Number of Classes:', num_classes)
 
-    cap.release()
-    cv2.destroyAllWindows() 
+# Map class names to indices
+class_to_idx = {class_name: idx for idx, class_name in enumerate(class_names)}
+
+# Gather all .pkl files from each class subdirectory
+data_files = []
+for class_name in class_names:
+    class_dir = os.path.join(dataset_path, class_name)
+    for file in os.listdir(class_dir):
+        if file.endswith('.pkl'):
+            data_files.append(os.path.join(class_dir, file))
+
+print(f'Total .pkl files found: {len(data_files)}')
+
+
+def load_dataset(data_files, class_to_idx, batch_size, split_size=0.2, fixed_T=30, num_classes=9):
+    """Load data files into torch DataLoader with splitting into train and validation sets."""
+    features, labels = [], []
+    for fil in data_files:
+        with open(fil, 'rb') as f:
+            fts = pickle.load(f)  # Load features
+            fts = np.array(fts)[:, 0, :, :]  #
+            
+            # Handle fixed sequence length
+            frame_num = fts.shape[0]
+            if frame_num < fixed_T:
+                pad_length = fixed_T - frame_num
+                fts = np.pad(fts, ((0, pad_length), (0,0), (0,0)), 'constant')
+            elif frame_num > fixed_T:
+                start = np.random.randint(0, frame_num - fixed_T)
+                fts = fts[start:start + fixed_T, :, :]
+            
+            features.append(fts)  # [fixed_T, 17, 3]
+            
+            # Assign label based on class directory
+            class_name = os.path.basename(os.path.dirname(fil))
+            class_idx = class_to_idx[class_name]
+            label = np.zeros(num_classes)
+            label[class_idx] = 1
+            labels.append(label)
+    
+    features = np.array(features)  # [N, fixed_T, 17, 3]
+    labels = np.array(labels)      # [N, num_classes]
+    
+    # Split into training and validation sets
+    if split_size > 0:
+        x_train, x_valid, y_train, y_valid = train_test_split(
+            features, labels, test_size=split_size, random_state=9, stratify=labels
+        )
+        train_set = data.TensorDataset(
+            torch.tensor(x_train, dtype=torch.float32).permute(0, 3, 1, 2),
+            torch.tensor(y_train, dtype=torch.float32)
+        )
+        valid_set = data.TensorDataset(
+            torch.tensor(x_valid, dtype=torch.float32).permute(0, 3, 1, 2),
+            torch.tensor(y_valid, dtype=torch.float32)
+        )
+        train_loader = data.DataLoader(
+            train_set, batch_size, shuffle=True, num_workers=4, pin_memory=True
+        )
+        valid_loader = data.DataLoader(
+            valid_set, batch_size, shuffle=False, num_workers=4, pin_memory=True
+        )
+    else:
+        train_set = data.TensorDataset(
+            torch.tensor(features, dtype=torch.float32).permute(0, 3, 1, 2),
+            torch.tensor(labels, dtype=torch.float32)
+        )
+        train_loader = data.DataLoader(
+            train_set, batch_size, shuffle=True, num_workers=4, pin_memory=True
+        )
+        valid_loader = None
+    return train_loader, valid_loader
+
+
+def accuracy_batch(y_pred, y_true):
+    return (y_pred.argmax(1) == y_true.argmax(1)).mean()
+
+
+def set_training(model, mode=True):
+    model.train(mode)
+    return model
+
 
 if __name__ == '__main__':
-    # video_path = '/home/gmission/vs-projects/SKELETON_BASED_ACTION_DETECTION/yolov7pose_ann/UNKNOWN_vid/walk/walk_03-02-12-30-23-393_video.mp4'  # Update this path
-    # pkl_file = '/home/gmission/vs-projects/SKELETON_BASED_ACTION_DETECTION/yolov7pose_ann/UNKNOWN_pkl/walk/walk_03-02-12-30-23-393_video.pkl'
+    # DATA.
+    train_loader, valid_loader = load_dataset(data_files, class_to_idx, batch_size, split_size=0.2, fixed_T=time_steps, num_classes=num_classes)
+    dataloader = {'train': train_loader, 'valid': valid_loader}
     
-    pkl_file = 'UNKNOWN_pkl/walk/walk_03-12-09-13-10-875_video.pkl'
-    video_path = 'UNKNOWN_vid/walk/walk_03-12-09-13-10-875_video.mp4'
-
-    # visualize_keypoints_on_video(video_path, pkl_file, resize_factor=0.5)
-
-# -----------------------------------------------------------------------------------
-#  multi-pkls visualization
-# -----------------------------------------------------------------------------------
-
-
-# import cv2
-# import pickle
-# import numpy as np
-# import glob
-# import os
-
-# # Load keypoints from pkl file
-# def load_keypoints(pkl_file):
-#     with open(pkl_file, 'rb') as f:
-#         keypoints_data = pickle.load(f)
-#     return keypoints_data
-
-# # Visualize keypoints on frame
-# def draw_keypoints_on_frame(frame, keypoints, color=(0, 255, 0), radius=3):
-#     for person_keypoints in keypoints:
-#         for kpt in person_keypoints:
-#             x, y, conf = int(kpt[0]), int(kpt[1]), kpt[2]
-#             if conf > 0.5:  # Only plot keypoints with confidence above 0.5
-#                 cv2.circle(frame, (x, y), radius, color, -1)
-#     return frame
-
-# # Visualize keypoints on video
-# def visualize_keypoints_on_video(video_path, pkl_file, resize_factor=0.5):
-#     keypoints_data = load_keypoints(pkl_file)
-#     cap = cv2.VideoCapture(video_path)
-
-#     frame_index = 0
-#     while cap.isOpened():
-#         ret, frame = cap.read()
-#         if not ret:
-#             break
-        
-#         if frame_index < len(keypoints_data):
-#             keypoints = keypoints_data[frame_index]
-#             frame = draw_keypoints_on_frame(frame, keypoints)
-        
-#         # Resize the frame
-#         frame = cv2.resize(frame, None, fx=resize_factor, fy=resize_factor)
-        
-#         cv2.imshow('Keypoints on Video', frame)
-#         if cv2.waitKey(40) & 0xFF == ord('q'):
-#             break
-        
-#         frame_index += 1
-
-#     cap.release()
-#     cv2.destroyAllWindows()
-
-
-# if __name__ == '__main__':
-
+    # MODEL.
+    graph_args = {'strategy': 'spatial'}
+    model = TwoStreamSpatialTemporalGraph(graph_args, num_classes).to(device)
     
-#     video_dir = 'NTU_RGB_15_temp/punch_even_vid/*.avi'
-#     pkl_dir = 'NTU_RGB_15_temp/punch_even_pkl_n1/*.pkl'
-
-#     video_files = sorted(glob.glob(video_dir))
-#     pkl_files = sorted(glob.glob(pkl_dir))
-
-#     for video_path, pkl_file in zip(video_files, pkl_files):
+    # Optimizer
+    optimizer = Adadelta(model.parameters(), lr=learning_rate)
+    
+    # Loss Function
+    losser = torch.nn.BCELoss()
+    
+    # TRAINING.
+    loss_list = {'train': [], 'valid': []}
+    accu_list = {'train': [], 'valid': []}
+    for e in range(epochs):
+        print(f'Epoch {e+1}/{epochs}')
+        for phase in ['train', 'valid']:
+            if phase == 'train':
+                model = set_training(model, True)
+            else:
+                model = set_training(model, False)
         
-#         visualize_keypoints_on_video(video_path, pkl_file, resize_factor=0.5)
-
-#         cv2.destroyAllWindows()
+            run_loss = 0.0
+            run_accu = 0.0
+            if phase == 'valid' and valid_loader is None:
+                continue
+            with tqdm(dataloader[phase], desc=phase) as iterator:
+                for pts, lbs in iterator:
+                    # Create motion input by distance of points (x, y) of the same node
+                    # in two frames.
+                    mot = pts[:, :2, 1:, :] - pts[:, :2, :-1, :]
+        
+                    mot = mot.to(device)
+                    pts = pts.to(device)
+                    lbs = lbs.to(device)
+        
+                    # Forward.
+                    out = model((pts, mot))
+                    loss = losser(out, lbs)
+        
+                    if phase == 'train':
+                        # Backward.
+                        optimizer.zero_grad()
+                        loss.backward()
+                        optimizer.step()
+        
+                    run_loss += loss.item()
+                    accu = accuracy_batch(out.detach().cpu().numpy(),
+                                          lbs.detach().cpu().numpy())
+                    run_accu += accu
+        
+                    iterator.set_postfix_str(f' loss: {loss.item():.4f}, accu: {accu:.4f}')
+        
+            loss_list[phase].append(run_loss / len(iterator))
+            accu_list[phase].append(run_accu / len(iterator))
+        
+        # Summary of the epoch
+        if 'valid' in loss_list and len(loss_list['valid']) > 0:
+            print(f'Summary epoch:\n - Train loss: {loss_list["train"][-1]:.4f}, accu: {accu_list["train"][-1]:.4f}\n - Valid loss: {loss_list["valid"][-1]:.4f}, accu: {accu_list["valid"][-1]:.4f}')
+        else:
+            print(f'Summary epoch:\n - Train loss: {loss_list["train"][-1]:.4f}, accu: {accu_list["train"][-1]:.4f}')
+    
+        # SAVE.
+        torch.save(model.state_dict(), os.path.join(save_folder, 'tsstg-model.pth'))
+    
+    del train_loader, valid_loader
+    
+    # EVALUATION.
+    model.load_state_dict(torch.load(os.path.join(save_folder, 'tsstg-model.pth')))
+    model = set_training(model, False)
+    eval_loader, _ = load_dataset(data_files, class_to_idx, batch_size, split_size=0.0, fixed_T=time_steps, num_classes=num_classes)
+    
+    print('Evaluation.')
+    run_loss = 0.0
+    run_accu = 0.0
+    y_preds = []
+    y_trues = []
+    with tqdm(eval_loader, desc='eval') as iterator:
+        for pts, lbs in iterator:
+            mot = pts[:, :2, 1:, :] - pts[:, :2, :-1, :]
+            mot = mot.to(device)
+            pts = pts.to(device)
+            lbs = lbs.to(device)
+    
+            out = model((pts, mot))
+            loss = losser(out, lbs)
+    
+            run_loss += loss.item()
+            accu = accuracy_batch(out.detach().cpu().numpy(),
+                                  lbs.detach().cpu().numpy())
+            run_accu += accu
+    
+            y_preds.extend(out.argmax(1).detach().cpu().numpy())
+            y_trues.extend(lbs.argmax(1).cpu().numpy())
+    
+            iterator.set_postfix_str(f' loss: {loss.item():.4f}, accu: {accu:.4f}')
+    
+    run_loss = run_loss / len(iterator)
+    run_accu = run_accu / len(iterator)
+    
+    print(f'Eval Loss: {run_loss:.4f}, Accu: {run_accu:.4f}')
