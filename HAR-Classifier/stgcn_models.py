@@ -242,3 +242,5 @@ class TwoStreamSpatialTemporalGraph(nn.Module):
         out = self.fcn(concat)
 
         return torch.sigmoid(out)
+
+
