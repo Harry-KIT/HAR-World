@@ -27,10 +27,10 @@ python visualize.py
 <img src="https://github.com/Harry-KIT/HAR-World/blob/main/HAR-Annotator/assets/hand_waving.gif" width="300" />|<img src="https://github.com/Harry-KIT/HAR-World/blob/main/HAR-Annotator/assets/kicking.gif" width="300" />|<img src="https://github.com/Harry-KIT/HAR-World/blob/main/HAR-Annotator/assets/punching.gif" width="300" />
 
 ## :pushpin: Pretrained Models
-Google Drive: [YOLOv7-Pose](https://drive.google.com/file/)
+GitHub Link: [yolov7-w6-pose](https://github.com/WongKinYiu/yolov7/releases/download/v0.1/yolov7-w6-pose.pt)
 
 ## :pushpin: Dataset
 Google Drive: [Action Data Samples](https://drive.google.com/file/d/1V8rQ5QR5q5zn1NHJhhf-6xIeDdXVtYs9/view)
 
 ## 👀 Contact Me
-If you have any questions, please feel free to email me at [ai.devveloper@gmail.com.com](ai.devveloper@gmail.com).
+If you have any questions, please feel free to email me at [ai.devveloper@gmail.com](ai.devveloper@gmail.com).
