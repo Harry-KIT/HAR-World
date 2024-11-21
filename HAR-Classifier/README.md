@@ -9,4 +9,4 @@ stgcn_train.py
 ```
 
 ## 📑: Paper
-## Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition [Paper_Link](https://arxiv.org/abs/1801.07455)
+### Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition [Paper_Link](https://arxiv.org/abs/1801.07455)
