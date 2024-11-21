@@ -1,129 +1,129 @@
-# -----------------------------------------------------------------------------------
-#  single pkl visualization
-# -----------------------------------------------------------------------------------
+### Reference from: https://github.com/yysijie/st-gcn/blob/master/net/utils/graph.py
 
-import cv2
-import pickle
+import os
+import torch
 import numpy as np
 
-# Load keypoints from pkl file
-def load_keypoints(pkl_file):
-    with open(pkl_file, 'rb') as f:
-        keypoints_data = pickle.load(f)
-    return keypoints_data
 
-# Visualize keypoints on frame
-def draw_keypoints_on_frame(frame, keypoints, color=(0, 255, 0), radius=3):
-    for person_keypoints in keypoints:
-        for kpt in person_keypoints:
-            x, y, conf = int(kpt[0]), int(kpt[1]), kpt[2]
-            print(f"Keypoint: x={x}, y={y}, conf={conf}")  
+class Graph:
+    """The Graph to model the skeletons extracted by the Alpha-Pose.
+    Args:
+        - strategy: (string) must be one of the follow candidates
+            - uniform: Uniform Labeling,
+            - distance: Distance Partitioning,
+            - spatial: Spatial Configuration,
+        For more information, please refer to the section 'Partition Strategies'
+            in our paper (https://arxiv.org/abs/1801.07455).
+        - layout: (string) must be one of the follow candidates
+            - coco_cut: Is COCO format but cut 4 joints (L-R ears, L-R eyes) out.
+        - max_hop: (int) the maximal distance between two connected nodes.
+        - dilation: (int) controls the spacing between the kernel points.
+    """
+    def __init__(self,
+                 layout='coco_cut',
+                 strategy='uniform',
+                 max_hop=1,
+                 dilation=1):
+        self.max_hop = max_hop
+        self.dilation = dilation
 
-            if conf > 0.5: 
-                cv2.circle(frame, (x, y), radius, color, -1)
-    return frame
-
-# Visualize keypoints on video
-def visualize_keypoints_on_video(video_path, pkl_file, resize_factor=0.5):
-    keypoints_data = load_keypoints(pkl_file)
-    cap = cv2.VideoCapture(video_path)
-
-    frame_index = 0
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        if frame_index < len(keypoints_data):
-            keypoints = keypoints_data[frame_index]
-            frame = draw_keypoints_on_frame(frame, keypoints)
-        
-        # Resize the frame
-        frame = cv2.resize(frame, None, fx=resize_factor, fy=resize_factor)
-        
-        cv2.imshow('Keypoints on Video', frame)
-        if cv2.waitKey(30) & 0xFF == ord('q'):
-            break
-        
-        frame_index += 1
-
-    cap.release()
-    cv2.destroyAllWindows() 
-
-if __name__ == '__main__':
-    # video_path = '/home/gmission/vs-projects/SKELETON_BASED_ACTION_DETECTION/yolov7pose_ann/UNKNOWN_vid/walk/walk_03-02-12-30-23-393_video.mp4'  # Update this path
-    # pkl_file = '/home/gmission/vs-projects/SKELETON_BASED_ACTION_DETECTION/yolov7pose_ann/UNKNOWN_pkl/walk/walk_03-02-12-30-23-393_video.pkl'
-    
-    pkl_file = 'UNKNOWN_pkl/walk/walk_03-12-09-13-10-875_video.pkl'
-    video_path = 'UNKNOWN_vid/walk/walk_03-12-09-13-10-875_video.mp4'
-
-    # visualize_keypoints_on_video(video_path, pkl_file, resize_factor=0.5)
-
-# -----------------------------------------------------------------------------------
-#  multi-pkls visualization
-# -----------------------------------------------------------------------------------
-
-
-# import cv2
-# import pickle
-# import numpy as np
-# import glob
-# import os
-
-# # Load keypoints from pkl file
-# def load_keypoints(pkl_file):
-#     with open(pkl_file, 'rb') as f:
-#         keypoints_data = pickle.load(f)
-#     return keypoints_data
-
-# # Visualize keypoints on frame
-# def draw_keypoints_on_frame(frame, keypoints, color=(0, 255, 0), radius=3):
-#     for person_keypoints in keypoints:
-#         for kpt in person_keypoints:
-#             x, y, conf = int(kpt[0]), int(kpt[1]), kpt[2]
-#             if conf > 0.5:  # Only plot keypoints with confidence above 0.5
-#                 cv2.circle(frame, (x, y), radius, color, -1)
-#     return frame
-
-# # Visualize keypoints on video
-# def visualize_keypoints_on_video(video_path, pkl_file, resize_factor=0.5):
-#     keypoints_data = load_keypoints(pkl_file)
-#     cap = cv2.VideoCapture(video_path)
-
-#     frame_index = 0
-#     while cap.isOpened():
-#         ret, frame = cap.read()
-#         if not ret:
-#             break
-        
-#         if frame_index < len(keypoints_data):
-#             keypoints = keypoints_data[frame_index]
-#             frame = draw_keypoints_on_frame(frame, keypoints)
-        
-#         # Resize the frame
-#         frame = cv2.resize(frame, None, fx=resize_factor, fy=resize_factor)
-        
-#         cv2.imshow('Keypoints on Video', frame)
-#         if cv2.waitKey(40) & 0xFF == ord('q'):
-#             break
-        
-#         frame_index += 1
-
-#     cap.release()
-#     cv2.destroyAllWindows()
-
-
-# if __name__ == '__main__':
+        self.get_edge(layout)
+        self.hop_dis = get_hop_distance(self.num_node, self.edge, max_hop)
+        self.get_adjacency(strategy)
 
     
-#     video_dir = 'NTU_RGB_15_temp/punch_even_vid/*.avi'
-#     pkl_dir = 'NTU_RGB_15_temp/punch_even_pkl_n1/*.pkl'
+    def get_edge(self, layout):
+        if layout == 'coco_cut':
+            self.num_node = 13
+            self_link = [(i, i) for i in range(self.num_node)]
 
-#     video_files = sorted(glob.glob(video_dir))
-#     pkl_files = sorted(glob.glob(pkl_dir))
+            # Ensure that the indices in neighbor_link are within the valid range
+            neighbor_link = [(6, 4), (4, 2), (2, 12), (12, 0), (5, 3), (3, 0), (11, 9),
+                            (9, 7), (7, 0), (10, 8), (8, 2), (12, 0)]
 
-#     for video_path, pkl_file in zip(video_files, pkl_files):
-        
-#         visualize_keypoints_on_video(video_path, pkl_file, resize_factor=0.5)
+            self.edge = self_link + neighbor_link
+            self.center = 0  # Assuming the center node is 0, adjust if necessary
 
-#         cv2.destroyAllWindows()
+        else:
+            raise ValueError('This layout is not supported!')
+
+
+    def get_adjacency(self, strategy):
+        valid_hop = range(0, self.max_hop + 1, self.dilation)
+        adjacency = np.zeros((self.num_node, self.num_node))
+        for hop in valid_hop:
+            adjacency[self.hop_dis == hop] = 1
+        normalize_adjacency = normalize_digraph(adjacency)
+
+        if strategy == 'uniform':
+            A = np.zeros((1, self.num_node, self.num_node))
+            A[0] = normalize_adjacency
+            self.A = A
+        elif strategy == 'distance':
+            A = np.zeros((len(valid_hop), self.num_node, self.num_node))
+            for i, hop in enumerate(valid_hop):
+                A[i][self.hop_dis == hop] = normalize_adjacency[self.hop_dis ==
+                                                                hop]
+            self.A = A
+        elif strategy == 'spatial':
+            A = []
+            for hop in valid_hop:
+                a_root = np.zeros((self.num_node, self.num_node))
+                a_close = np.zeros((self.num_node, self.num_node))
+                a_further = np.zeros((self.num_node, self.num_node))
+                for i in range(self.num_node):
+                    for j in range(self.num_node):
+                        if self.hop_dis[j, i] == hop:
+                            if self.hop_dis[j, self.center] == self.hop_dis[i, self.center]:
+                                a_root[j, i] = normalize_adjacency[j, i]
+                            elif self.hop_dis[j, self.center] > self.hop_dis[i, self.center]:
+                                a_close[j, i] = normalize_adjacency[j, i]
+                            else:
+                                a_further[j, i] = normalize_adjacency[j, i]
+                if hop == 0:
+                    A.append(a_root)
+                else:
+                    A.append(a_root + a_close)
+                    A.append(a_further)
+            A = np.stack(A)
+            self.A = A
+            #self.A = np.swapaxes(np.swapaxes(A, 0, 1), 1, 2)
+        else:
+            raise ValueError("This strategy is not supported!")
+
+
+def get_hop_distance(num_node, edge, max_hop=1):
+    A = np.zeros((num_node, num_node))
+    for i, j in edge:
+        A[j, i] = 1
+        A[i, j] = 1
+
+    # compute hop steps
+    hop_dis = np.zeros((num_node, num_node)) + np.inf
+    transfer_mat = [np.linalg.matrix_power(A, d) for d in range(max_hop + 1)]
+    arrive_mat = (np.stack(transfer_mat) > 0)
+    for d in range(max_hop, -1, -1):
+        hop_dis[arrive_mat[d]] = d
+    return hop_dis
+
+
+def normalize_digraph(A):
+    Dl = np.sum(A, 0)
+    num_node = A.shape[0]
+    Dn = np.zeros((num_node, num_node))
+    for i in range(num_node):
+        if Dl[i] > 0:
+            Dn[i, i] = Dl[i]**(-1)
+    AD = np.dot(A, Dn)
+    return AD
+
+
+def normalize_undigraph(A):
+    Dl = np.sum(A, 0)
+    num_node = A.shape[0]
+    Dn = np.zeros((num_node, num_node))
+    for i in range(num_node):
+        if Dl[i] > 0:
+            Dn[i, i] = Dl[i]**(-0.5)
+    DAD = np.dot(np.dot(Dn, A), Dn)
+    return DAD
